@@ -1,15 +1,14 @@
+import logging
 import os
 import json
 import re
 import requests
-import logging
 from dotenv import load_dotenv
 import asyncpg
-logging.getLogger('twitchio').setLevel(logging.CRITICAL)
 from twitchio.ext import commands, eventsub
 import twitchio
 import asyncio
-from typing import Union, Optional, get_args
+from typing import Optional
 from zoneinfo import ZoneInfo
 import time
 from datetime import datetime, timedelta
@@ -17,6 +16,7 @@ import calendar
 
 load_dotenv()
 
+logging.getLogger('twitchio').setLevel(logging.CRITICAL)
 logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(message)s', encoding='utf-8')
 
 berlin_zone = ZoneInfo("Europe/Berlin")
@@ -190,7 +190,7 @@ class Bot(commands.Bot):
         if channel is None:
             channel = ctx.author.name.lower()
         mods = await self.get_mods(channel)
-        if ctx.author.name.lower() == os.getenv('Bot_Admin') or ctx.author.name.lower() in mods:
+        if ctx.author.name.lower() == os.getenv('Bot_Admin'):
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
             if channel not in channels:
@@ -206,6 +206,17 @@ class Bot(commands.Bot):
         elif ctx.author.name.lower() not in mods and ctx.author.name.lower() != os.getenv('Bot_Admin'):
             await ctx.send("Nur der Streamer und die Moderatoren können den Bot einem Kanal hinzufügen.")
             return
+        elif ctx.channel.name == ctx.author.name.lower() and ctx.author.name.lower() in mods:
+            with open('channels.json', 'r') as f:
+                channels = json.load(f)
+            if channel not in channels:
+                channels.append(channel.lower())
+                with open('channels.json', 'w') as f:
+                    json.dump(channels, f)
+                await self.join_channels([channel])
+                broadcaster_id = await self.fetch_users(names=[channel])
+                await esclient.subscribe_channel_stream_start(broadcaster=broadcaster_id[0].id)
+                await ctx.reply(f"/me Beigetreten zum Kanal: {channel}")
 
     @commands.command(name='leave')
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -384,14 +395,9 @@ class Bot(commands.Bot):
     @commands.command(name='commands')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
-        hidden_commands = ['commands', 'status']
-        available_commands = [command for command in self.commands.keys()]
-        for hidden_command in hidden_commands:
-            if hidden_command in available_commands:
-                available_commands.remove(hidden_command)
-        await ctx.reply(f"/me Die verfügbaren Befehle sind: {', '.join(available_commands)}")
+        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/PsLL2pJv")
 
-    @commands.command(name='searchlogs', aliases=['srlogs', 'slogs', 'searchlog', 'slog'])
+    @commands.command(name='searchlogs', aliases=['srlogs', 'srlog', 'searchlog', 'slogs' 'slog'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
     async def searchlogs(self, ctx, channel_name=None):
         if channel_name is None:
