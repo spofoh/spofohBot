@@ -1,0 +1,5 @@
+.env
+bot.log
+channels.json
+start.sh
+blacklist.json
