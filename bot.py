@@ -79,6 +79,7 @@ class Bot(commands.Bot):
         self.live_channels_today = set()
         
     async def __ainit__(self) -> None:
+        await esclient.delete_all_active_subscriptions()
         with open('channels.json', 'r') as f:
             channels = json.load(f)
         self.loop.create_task(esclient.listen(port=4000))
@@ -99,8 +100,8 @@ class Bot(commands.Bot):
         }
         response = requests.request("POST", url, headers=headers, data=payload)
         data = json.loads(response.text)
-        if 0 in data and 'data' in data[0] and 'user' in data[0]['data'] and 'mods' in data[0]['data']['user'] and 'edges' in data[0]['data']['user']['mods']:
-            mods = [edge['node']['login'] for edge in data[0]['data']['user']['mods']['edges']] if data[0]['data']['user']['mods']['edges'] else []
+        if data and 'data' in data[0] and 'user' in data[0]['data'] and 'mods' in data[0]['data']['user'] and 'edges' in data[0]['data']['user']['mods']:
+            mods = [edge['node']['login'] for edge in data[0]['data']['user']['mods']['edges']]
         else:
             mods = []
         mods.append(channel)
@@ -190,6 +191,7 @@ class Bot(commands.Bot):
         if channel is None:
             channel = ctx.author.name.lower()
         mods = await self.get_mods(channel)
+        print(mods)
         if ctx.author.name.lower() == os.getenv('Bot_Admin'):
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
@@ -395,7 +397,7 @@ class Bot(commands.Bot):
     @commands.command(name='commands')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
-        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/PsLL2pJv")
+        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
 
     @commands.command(name='searchlogs', aliases=['srlogs', 'srlog', 'searchlog', 'slogs' 'slog'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
@@ -473,7 +475,6 @@ class Bot(commands.Bot):
                                     database=os.getenv('db_database'))
         if time_parts:
             mods = await self.get_mods(os.getenv('Bot_Admin'))
-            print(mods)
             if ctx.author.name not in mods:
                 await ctx.reply('/me Nur Moderatoren können die Zeit hinzufügen.')
                 return
@@ -485,22 +486,16 @@ class Bot(commands.Bot):
             seconds = 0
             for part in parts:
                 if "h" in part:
-                    print("nur h detected")
                     hours = part.split("h")[0]
                 elif "m" in part:
-                    print("nur m detected")
                     minutes = part.split("m")[0]
                 elif "s" in part:
-                    print("nur s detected")
                     seconds = part.split("s")[0]
                 time_in_seconds = int(minutes) * 60 + int(hours) * 3600 + int(seconds)
-                print(time_in_seconds)
-            print(streamer_name)
             streamer_twitch_id = await self.fetch_users(names=[streamer_name])
             if not streamer_twitch_id:
                 await ctx.reply('/me Kein Kanal gefunden mit diesem Namen')
                 return
-            print(streamer_twitch_id[0].id)
             await conn.execute('''
                 INSERT INTO twitch_channels(channel_id, watch_time) VALUES($1, $2)
                 ON CONFLICT (channel_id) DO UPDATE SET watch_time = twitch_channels.watch_time + $2
@@ -541,7 +536,8 @@ class Bot(commands.Bot):
                 time_str = ", ".join(parts) + " und " + last_part
             else:
                 time_str = parts[0] if parts else ""
-            await ctx.reply(f'/me {os.getenv('Bot_Admin')} hat {streamer_twitch_id[0].display_name} schon: {time_str} restreamt.')
+            Bot_Admin = os.getenv('Bot_Admin')
+            await ctx.reply(f'/me {Bot_Admin} hat {streamer_twitch_id[0].display_name} schon: {time_str} restreamt.')
 
 bot = Bot()
 bot.loop.run_until_complete(bot.__ainit__())
