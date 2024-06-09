@@ -160,7 +160,6 @@ class Bot(commands.Bot):
         print(f'Stream gestartet: {event.data.broadcaster.name}')
         esclient.delete_all_active_subscriptions()
         channel_name = event.data.broadcaster.name
-        # Überprüfen, ob der Kanal bereits heute live war
         if channel_name not in bot.live_channels_today:
             bot.live_channels_today.add(channel_name)
             print(bot.live_channels_today)
@@ -419,7 +418,7 @@ class Bot(commands.Bot):
 
     @commands.command(name='offdays')
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
-    async def offdays_command(self, ctx, month: Optional[str], year: Optional[str], channel_name: Optional[str]):
+    async def offdays_command(self, ctx, channel_name: Optional[str], month: Optional[str], year: Optional[str]):
         month_mapping = {
         'januar': 1, 'februar': 2, 'märz': 3, 'april': 4, 'mai': 5, 'juni': 6,
         'juli': 7, 'august': 8, 'september': 9, 'oktober': 10, 'november': 11, 'dezember': 12
