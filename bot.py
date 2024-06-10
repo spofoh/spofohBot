@@ -111,15 +111,22 @@ class Bot(commands.Bot):
         conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS twitch_channels (
+                channel_id INTEGER PRIMARY KEY,
+                watch_time INTEGER
+            );
+        ''')
 
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS channel_monthly_stats (
+            CREATE TABLE IF NOT EXISTS channel_offdays_stats (
                 id SERIAL PRIMARY KEY,
-                channel_name VARCHAR(255) NOT NULL,
+                channel_id INT NOT NULL,
                 year INT NOT NULL,
                 month INT NOT NULL,
                 live_days INT DEFAULT 0,
-                UNIQUE (channel_name, year, month)
+                UNIQUE (channel_id, year, month)
             )
         """)
 
@@ -133,23 +140,25 @@ class Bot(commands.Bot):
         conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
 
         result = await conn.fetchrow(
-    "SELECT id, live_days FROM channel_monthly_stats WHERE channel_name=$1 AND month=$2 AND year=$3",
-    channel_name.lower(), month, year
+    "SELECT id, live_days FROM channel_offdays_stats WHERE channel_id=$1 AND month=$2 AND year=$3",
+    streamer_twitch_id[0].id, month, year
 )
         print(result)
 
         if result:
             new_live_days = result['live_days'] + 1
             await conn.execute(
-                "UPDATE channel_monthly_stats SET live_days=$1 WHERE id=$2",
+                "UPDATE channel_offdays_stats SET live_days=$1 WHERE id=$2",
                 new_live_days, result['id']
             )
         else:
             await conn.execute(
-                "INSERT INTO channel_monthly_stats (channel_name, month, year, live_days) VALUES ($1, $2, $3, 1)",
-                channel_name.lower(), month, year
+                "INSERT INTO channel_offdays_stats (channel_id, month, year, live_days) VALUES ($1, $2, $3, 1)",
+                streamer_twitch_id[0].id, month, year
             )
 
 
@@ -190,7 +199,6 @@ class Bot(commands.Bot):
         if channel is None:
             channel = ctx.author.name.lower()
         mods = await self.get_mods(channel)
-        print(mods)
         if ctx.author.name.lower() == os.getenv('Bot_Admin'):
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
@@ -396,7 +404,7 @@ class Bot(commands.Bot):
     @commands.command(name='commands')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
-        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
+        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/PsLL2pJv")
 
     @commands.command(name='searchlogs', aliases=['srlogs', 'srlog', 'searchlog', 'slogs' 'slog'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
@@ -444,9 +452,13 @@ class Bot(commands.Bot):
         conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+        if not streamer_twitch_id:
+            await ctx.reply('/me Kein Kanal gefunden mit diesem Namen')
+            return
         result = await conn.fetchrow(
-            "SELECT live_days FROM channel_monthly_stats WHERE LOWER(channel_name) = LOWER($1) AND month=$2 AND year=$3",
-            channel_name.lower(), month, year
+            "SELECT live_days FROM channel_offdays_stats WHERE channel_id=$1 AND month=$2 AND year=$3",
+            streamer_twitch_id[0].id, month, year
         )
         await conn.close()
 
@@ -459,12 +471,12 @@ class Bot(commands.Bot):
         offdays = days_in_month - live_days
 
         if month == datetime.now().month and year == datetime.now().year:
-            await ctx.reply(f"/me Offdays für diesen Monat im Channel {channel_name}: {offdays} ({live_days}/{days_in_month})")
+            await ctx.reply(f"/me Offdays für diesen Monat im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
         else:
             month_names = ["Januar", "Februar", "März", "April", "Mai", "Juni",
                         "Juli", "August", "September", "Oktober", "November", "Dezember"]
             month_name = month_names[month - 1]
-            await ctx.reply(f"/me Offdays für {month_name} im Channel {channel_name}: {offdays} ({live_days}/{days_in_month})")
+            await ctx.reply(f"/me Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
 
     @commands.command(name='restreams')
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -474,6 +486,7 @@ class Bot(commands.Bot):
                                     database=os.getenv('db_database'))
         if time_parts:
             mods = await self.get_mods(os.getenv('Bot_Admin'))
+            print(mods)
             if ctx.author.name not in mods:
                 await ctx.reply('/me Nur Moderatoren können die Zeit hinzufügen.')
                 return
@@ -485,16 +498,22 @@ class Bot(commands.Bot):
             seconds = 0
             for part in parts:
                 if "h" in part:
+                    print("nur h detected")
                     hours = part.split("h")[0]
                 elif "m" in part:
+                    print("nur m detected")
                     minutes = part.split("m")[0]
                 elif "s" in part:
+                    print("nur s detected")
                     seconds = part.split("s")[0]
                 time_in_seconds = int(minutes) * 60 + int(hours) * 3600 + int(seconds)
+                print(time_in_seconds)
+            print(streamer_name)
             streamer_twitch_id = await self.fetch_users(names=[streamer_name])
             if not streamer_twitch_id:
                 await ctx.reply('/me Kein Kanal gefunden mit diesem Namen')
                 return
+            print(streamer_twitch_id[0].id)
             await conn.execute('''
                 INSERT INTO twitch_channels(channel_id, watch_time) VALUES($1, $2)
                 ON CONFLICT (channel_id) DO UPDATE SET watch_time = twitch_channels.watch_time + $2
