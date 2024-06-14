@@ -11,7 +11,7 @@ import asyncio
 from typing import Optional
 from zoneinfo import ZoneInfo
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import calendar
 
 load_dotenv()
@@ -394,17 +394,37 @@ class Bot(commands.Bot):
         response = requests.request("GET", url, headers=headers)
         data = json.loads(response.text)
         free_games = []
+
         for element in data['data']['Catalog']['searchStore']['elements']:
-            if element['status'] == 'ACTIVE' and element['offerType'] == 'OTHERS' and any(category['path'] == 'freegames' or category['path'] == 'games' for category in element['categories']):
-                effective_date = datetime.strptime(element['effectiveDate'], '%Y-%m-%dT%H:%M:%S.%fZ')
-                if effective_date < datetime.utcnow():
-                    free_games.append(element['title'])
-        await ctx.reply(f"/me Die momentanen Free Games auf Epic: {', '.join(free_games)}")
+            if element['status'] == 'ACTIVE' and element['offerType'] != 'ADD_ON' and any(category['path'] == 'freegames' or category['path'] == 'games' for category in element['categories']):
+                promotion = element.get('promotions', None)
+                if promotion:
+                    for promotional_offer in promotion.get('promotionalOffers', []):
+                        for offer in promotional_offer['promotionalOffers']:
+                            start_date = datetime.strptime(offer['startDate'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+                            end_date = datetime.strptime(offer['endDate'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+                            current_time_utc = datetime.now(timezone.utc)
+                            if start_date <= current_time_utc <= end_date:
+                                free_games.append(element['title'])
+                                break
+
+                    for upcoming_offer in promotion.get('upcomingPromotionalOffers', []):
+                        for offer in upcoming_offer['promotionalOffers']:
+                            start_date = datetime.strptime(offer['startDate'], '%Y-%m-%dT%H:%M:%S.%fZ')
+                            end_date = datetime.strptime(offer['endDate'], '%Y-%m-%dT%H:%M:%S.%fZ')
+                            if start_date <= datetime.utcnow() <= end_date:
+                                free_games.append(element['title'])
+                                break
+
+        if free_games:
+            await ctx.reply(f"/me Die momentanen Free Games auf Epic: {', '.join(free_games)}")
+        else:
+            await ctx.reply("/me Es gibt momentan keine kostenlosen Spiele auf Epic.")
 
     @commands.command(name='commands')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
-        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/PsLL2pJv")
+        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
 
     @commands.command(name='searchlogs', aliases=['srlogs', 'srlog', 'searchlog', 'slogs' 'slog'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
@@ -424,7 +444,7 @@ class Bot(commands.Bot):
         else:
             await ctx.reply(f'/me Keine Logs gefunden für den Channel: {channel_name}')
 
-    @commands.command(name='offdays')
+    @commands.command(name='offdays', aliases=['offday'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
     async def offdays_command(self, ctx, channel_name: Optional[str], month: Optional[str], year: Optional[str]):
         month_mapping = {
@@ -478,7 +498,7 @@ class Bot(commands.Bot):
             month_name = month_names[month - 1]
             await ctx.reply(f"/me Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
 
-    @commands.command(name='restreams')
+    @commands.command(name='restreams', aliases=['restream'])
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
     async def restreams(self, ctx, streamer_name: str, *time_parts):
         conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
