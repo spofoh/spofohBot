@@ -21,44 +21,10 @@ logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(message)s'
 
 berlin_zone = ZoneInfo("Europe/Berlin")
 
-log_sites = [
-  'https://logs.ivr.fi',
-  'https://logs.2807.eu',
-  'https://logsback.susgee.dev',
-  'https://logs.spanix.team',
-  'https://logs.nadeko.net',
-  'https://log.spofoh.de'
-]
-
-frontend_url = 'https://logs.lucas19961.de'
-
-def search_logs(channel_name):
-    available_logs = []
-
-    for site in log_sites:
-        response = requests.get(f'{site}/channels')
-
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                channels = [channel['name'] for channel in data['channels']]
-
-                if channel_name.lower() in channels:
-                    if 'logsback.susgee.dev' in site:
-                        available_logs.append(f'{frontend_url}/?channel={channel_name}')
-                    else:
-                        available_logs.append(f'{site}/?channel={channel_name}')
-            except ValueError:
-                print(f'Warnung: Die Antwort von {site}/channels konnte nicht als JSON interpretiert werden.')
-        else:
-            print(f'Warnung: Anfrage an {site}/channels hat den Statuscode {response.status_code} zurückgegeben.')
-
-    return available_logs
-
 esbot = commands.Bot.from_client_credentials(client_id=os.getenv('Twitch_App_ID'),
                                          client_secret=os.getenv('Twitch_App_Token'))
 
-# Erstellen Sie eine Instanz des EventSubClients
+
 esclient = eventsub.EventSubClient(esbot,
                                    webhook_secret=os.getenv('webhook_secret_pw'),
                                    callback_route='https://eventsub.spofoh.de/callback')
@@ -130,10 +96,17 @@ class Bot(commands.Bot):
             )
         """)
 
+        await conn.execute('''CREATE TABLE IF NOT EXISTS streaks (
+                streamer_id INTEGER PRIMARY KEY,
+                current_streak INTEGER,
+                highest_streak INTEGER,
+                last_live_date TEXT
+            )''')
+
         await conn.close()
 
     async def update_live_days(self, channel_name):
-        today = datetime.now().date()
+        today = datetime.now(berlin_zone).date()
         month = today.month
         year = today.year
 
@@ -164,11 +137,75 @@ class Bot(commands.Bot):
 
         await conn.close()
 
+    async def update_streak(self, streamer_name):
+        today = datetime.now(berlin_zone).date()
+            
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                    user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                    database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        streamer_twitch_id = await self.fetch_users(names=[streamer_name])
+        streamer_id = streamer_twitch_id[0].id
+        
+        row = await conn.fetchrow("SELECT current_streak, highest_streak, last_live_date FROM streaks WHERE streamer_id = $1", (streamer_id))
+        print(row)
+
+        if row:
+            current_streak, highest_streak, last_live_date = row
+            last_live_date = datetime.strptime(last_live_date, '%Y-%m-%d').date()
+
+            if last_live_date == today:
+                return
+
+            if last_live_date == today - timedelta(days=1):
+                current_streak += 1
+            else:
+                current_streak = 1
+
+            if current_streak > highest_streak:
+                highest_streak = current_streak
+
+            await conn.execute(f"""
+                UPDATE streaks 
+                SET current_streak={current_streak}, highest_streak={highest_streak}, last_live_date='{str(today)}' 
+                WHERE streamer_id={streamer_id}
+            """)
+        else:
+            await conn.execute(
+                '''INSERT INTO streaks (streamer_id, current_streak, highest_streak, last_live_date) 
+                   VALUES ($1, $2, $3, $4)''',
+                streamer_id, 1, 1, str(today)
+            )
+
+        await conn.close()
+
+    async def reset_streaks(self):
+        today = datetime.now(berlin_zone).date()
+        yesterday = today - timedelta(days=1)
+
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+
+        rows = await conn.fetch("SELECT streamer_id, last_live_date FROM streaks")
+        for row in rows:
+            streamer_id, last_live_date = row
+            last_live_date = datetime.strptime(last_live_date, '%Y-%m-%d').date()
+
+            if last_live_date < yesterday:
+                await conn.execute("""
+                    UPDATE streaks 
+                    SET current_streak=0 
+                    WHERE streamer_id=$1
+                """, streamer_id)
+
+        await conn.close()
+
     @esbot.event()
     async def event_eventsub_notification_stream_start(event: eventsub.StreamOnlineData) -> None:
         print(f'Stream gestartet: {event.data.broadcaster.name}')
-        esclient.delete_all_active_subscriptions()
         channel_name = event.data.broadcaster.name
+        await bot.update_streak(channel_name)
         if channel_name not in bot.live_channels_today:
             bot.live_channels_today.add(channel_name)
             print(bot.live_channels_today)
@@ -377,7 +414,6 @@ class Bot(commands.Bot):
             response_json = json.loads(response.text)
             translated_message = response_json['bot'].strip('"')
 
-            # Überprüfen Sie, ob die Antwort ein verbotenes Wort enthält
             cleaned_message = re.sub(r'\W+', '', translated_message.lower())
             if any(badword in cleaned_message for badword in self.blacklist):
                 await ctx.reply("Blacklist-Wort in der Nachricht enthalten.")
@@ -425,24 +461,6 @@ class Bot(commands.Bot):
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
         await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
-
-    @commands.command(name='searchlogs', aliases=['srlogs', 'srlog', 'searchlog', 'slogs' 'slog'])
-    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
-    async def searchlogs(self, ctx, channel_name=None):
-        if channel_name is None:
-            channel_name = ctx.channel.name
-
-        cleaned_channel_name = re.sub(r'\W+', '', channel_name.lower())
-        if any(badword in cleaned_channel_name for badword in self.blacklist):
-            await ctx.reply("/me Blacklist-Wort im Kanalnamen enthalten.")
-            return
-
-        logs = search_logs(channel_name)
-
-        if logs:
-            await ctx.reply(f'/me Die Logs vom Channel: {channel_name} sind auf den folgenden Seiten verfügbar: {" ".join(logs)}')
-        else:
-            await ctx.reply(f'/me Keine Logs gefunden für den Channel: {channel_name}')
 
     @commands.command(name='offdays', aliases=['offday'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
@@ -577,6 +595,28 @@ class Bot(commands.Bot):
             Bot_Admin = os.getenv('Bot_Admin')
             await ctx.reply(f'/me {Bot_Admin} hat {streamer_twitch_id[0].display_name} schon: {time_str} restreamt.')
 
+    @commands.command(name='streak')
+    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
+    async def streak(self, ctx, channel_name: Optional[str]):
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                    user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                    database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        if channel_name is None:
+            channel_name = ctx.channel.name
+        
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+
+        row = await conn.fetchrow("SELECT current_streak, highest_streak FROM streaks WHERE streamer_id = $1", (streamer_twitch_id[0].id))
+
+        if row:
+            current_streak, highest_streak = row
+            await ctx.reply(
+    f"/me {streamer_twitch_id[0].name}'s aktuelle daily Streak: {current_streak} {'Tag' if current_streak == 1 else 'Tage'}, "
+    f"höchste tracked daily Streak: {highest_streak} {'Tag' if highest_streak == 1 else 'Tage'}")
+        else:
+            await ctx.reply(f"/me Keine Daten für {streamer_twitch_id[0].name} verfügbar")
+
 bot = Bot()
 bot.loop.run_until_complete(bot.__ainit__())
 bot.loop.run_until_complete(bot.create_database_tables())
@@ -588,6 +628,7 @@ async def schedule_daily_reset():
         print(seconds_until_midnight)
         await asyncio.sleep(seconds_until_midnight)
         bot.live_channels_today.clear()
+        await bot.reset_streaks()
 
 bot.loop.create_task(schedule_daily_reset())
 bot.run()
