@@ -21,6 +21,45 @@ logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(message)s'
 
 berlin_zone = ZoneInfo("Europe/Berlin")
 
+log_sites = [
+  'https://logs.ivr.fi',
+  'https://logs.2807.eu',
+  'https://logs.susgee.dev',
+  'https://logs.spanix.team',
+  'https://logs.nadeko.net',
+  'https://log.spofoh.de'
+]
+
+
+def search_logs(channel_name, username=None):
+    available_logs = []
+
+    for site in log_sites:
+        try:
+            response = requests.get(f'{site}/channels')
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    channels = [channel['name'] for channel in data['channels']]
+
+                    if channel_name.lower() in channels:
+                        url = f'{site}/?channel={channel_name}'
+
+                        if username:
+                            url += f'&username={username}'
+                    
+                        available_logs.append(url)
+                except ValueError:
+                    print(f'Warnung: Die Antwort von {site}/channels konnte nicht als JSON interpretiert werden.')
+            else:
+                print(f'Warnung: Anfrage an {site}/channels hat den Statuscode {response.status_code} zurückgegeben.')
+
+        except requests.exceptions.RequestException as e:
+            print(f'Warnung: Anfrage an {site} fehlgeschlagen. Fehlermeldung: {str(e)}')
+
+    return available_logs
+
 esbot = commands.Bot.from_client_credentials(client_id=os.getenv('Twitch_App_ID'),
                                          client_secret=os.getenv('Twitch_App_Token'))
 
@@ -42,7 +81,6 @@ class Bot(commands.Bot):
             channels = json.load(f)
         super().__init__(token=os.getenv('Twitch_Generator_Token'), client_id=os.getenv('Twitch_Generator_ID'), prefix='+',
                          initial_channels=channels)
-        self.live_channels_today = set()
         
     async def __ainit__(self) -> None:
         await esclient.delete_all_active_subscriptions()
@@ -102,6 +140,11 @@ class Bot(commands.Bot):
                 highest_streak INTEGER,
                 last_live_date TEXT
             )''')
+        
+        await conn.execute('''CREATE TABLE IF NOT EXISTS live_channels_today (
+                streamer_id INTEGER PRIMARY KEY,
+                last_live_date TEXT
+            )''')
 
         await conn.close()
 
@@ -120,7 +163,6 @@ class Bot(commands.Bot):
     "SELECT id, live_days FROM channel_offdays_stats WHERE channel_id=$1 AND month=$2 AND year=$3",
     streamer_twitch_id[0].id, month, year
 )
-        print(result)
 
         if result:
             new_live_days = result['live_days'] + 1
@@ -148,13 +190,13 @@ class Bot(commands.Bot):
         streamer_id = streamer_twitch_id[0].id
         
         row = await conn.fetchrow("SELECT current_streak, highest_streak, last_live_date FROM streaks WHERE streamer_id = $1", (streamer_id))
-        print(row)
 
         if row:
             current_streak, highest_streak, last_live_date = row
             last_live_date = datetime.strptime(last_live_date, '%Y-%m-%d').date()
 
             if last_live_date == today:
+                print(f'{streamer_name} ist bereits heute live gegangen.')
                 return
 
             if last_live_date == today - timedelta(days=1):
@@ -206,10 +248,57 @@ class Bot(commands.Bot):
         print(f'Stream gestartet: {event.data.broadcaster.name}')
         channel_name = event.data.broadcaster.name
         await bot.update_streak(channel_name)
-        if channel_name not in bot.live_channels_today:
-            bot.live_channels_today.add(channel_name)
-            print(bot.live_channels_today)
-            await bot.update_live_days(channel_name)
+
+        today = datetime.now(berlin_zone).date()
+        last_stream_date = await bot.get_last_stream_date(channel_name)
+        
+        if last_stream_date is None:
+            await bot.create_new_streamer_entry(channel_name, today)
+        else:
+            if str(last_stream_date) == str(today):
+                return
+            else:
+                await bot.update_last_stream_date(channel_name, today)
+                await bot.update_live_days(channel_name)
+
+    async def get_last_stream_date(self, channel_name):
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+        streamer_id = streamer_twitch_id[0].id
+
+        last_stream_date = await conn.fetchval(
+            "SELECT last_live_date FROM live_channels_today WHERE streamer_id = $1", streamer_id
+        )
+        return last_stream_date
+    
+    async def create_new_streamer_entry(self, channel_name, today):
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+        streamer_id = streamer_twitch_id[0].id
+
+        await conn.execute(
+            "INSERT INTO live_channels_today (streamer_id, last_live_date) VALUES ($1, $2)",
+            streamer_id, str(today)
+        )
+
+    async def update_last_stream_date(self, channel_name, today):
+        conn = await asyncpg.connect(host=os.getenv('db_host_ip'), port=os.getenv('db_port'),
+                                     user=os.getenv('db_user'), password=os.getenv('db_password'),
+                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
+        
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+        streamer_id = streamer_twitch_id[0].id
+
+        await conn.execute(
+            "UPDATE live_channels_today SET last_live_date = $1 WHERE streamer_id = $2",
+            str(today), streamer_id
+        )
 
     async def event_ready(self):
         print(f'Ready | {self.nick}')
@@ -462,6 +551,26 @@ class Bot(commands.Bot):
     async def list_commands(self, ctx):
         await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
 
+    @commands.command(name='logs')
+    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
+    async def searchlogs(self, ctx, channel_name=None, username=None):
+        if channel_name is None:
+            channel_name = ctx.channel.name
+
+        cleaned_channel_name = re.sub(r'\W+', '', channel_name.lower())
+        if any(badword in cleaned_channel_name for badword in self.blacklist):
+            await ctx.reply("/me Blacklist-Wort im Kanalnamen enthalten.")
+            return
+
+        logs = search_logs(channel_name, username)
+
+        if logs:
+            await ctx.reply(f'/me Die Logs vom Channel: {channel_name} sind auf den folgenden Seiten verfügbar: {" ".join(logs)}')
+        else:
+            response = f'/me Keine Logs gefunden für den Channel. Benutze logs instanzen: '
+            response += ' | '.join(log_sites[1:]) if len(log_sites) > 1 else ''
+            await ctx.reply(response)
+
     @commands.command(name='offdays', aliases=['offday'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
     async def offdays_command(self, ctx, channel_name: Optional[str], month: Optional[str], year: Optional[str]):
@@ -627,7 +736,6 @@ async def schedule_daily_reset():
         seconds_until_midnight = (midnight - now).total_seconds()
         print(seconds_until_midnight)
         await asyncio.sleep(seconds_until_midnight)
-        bot.live_channels_today.clear()
         await bot.reset_streaks()
 
 bot.loop.create_task(schedule_daily_reset())
