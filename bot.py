@@ -196,7 +196,6 @@ class Bot(commands.Bot):
             last_live_date = datetime.strptime(last_live_date, '%Y-%m-%d').date()
 
             if last_live_date == today:
-                print(f'{streamer_name} ist bereits heute live gegangen.')
                 return
 
             if last_live_date == today - timedelta(days=1):
