@@ -725,7 +725,7 @@ class Bot(commands.Bot):
             data = response.json()
 
             if not data:
-                print("⚠️ Der gesuchte Streamer wurde nicht gefunden! ⚠️")
+                ctx.reply("/me ⚠️ Der Streamer wird nicht auf sullygnome getracked. ⚠️")
                 return
 
             streamer_id = data[0]['value']
