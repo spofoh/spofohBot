@@ -343,11 +343,11 @@ class Bot(commands.Bot):
                 await self.join_channels([channel])
                 broadcaster_id = await self.fetch_users(names=[channel])
                 await esclient.subscribe_channel_stream_start(broadcaster=broadcaster_id[0].id)
-                await ctx.reply(f"/me Beigetreten zum Kanal: {channel}")
+                await ctx.reply(f"/me ✅ Beigetreten zum Kanal: {channel}")
             else:
                 await ctx.reply(f"/me Ich bin bereits dem Kanal {channel} beigetreten.")
         elif ctx.author.name.lower() not in mods and ctx.author.name.lower() != os.getenv('Bot_Admin'):
-            await ctx.reply("/me Nur der Streamer und die Moderatoren können den Bot einem Kanal hinzufügen.")
+            await ctx.reply("/me ⚠️ Nur der Streamer und die Moderatoren können den Bot einem Kanal hinzufügen. ⚠️")
             return
         elif ctx.author.name.lower() in mods:
             with open('channels.json', 'r') as f:
@@ -359,7 +359,7 @@ class Bot(commands.Bot):
                 await self.join_channels([channel])
                 broadcaster_id = await self.fetch_users(names=[channel])
                 await esclient.subscribe_channel_stream_start(broadcaster=broadcaster_id[0].id)
-                await ctx.reply(f"/me Beigetreten zum Kanal: {channel}")
+                await ctx.reply(f"/me ✅ Beigetreten zum Kanal: {channel}")
 
     @commands.command(name='leave')
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -367,7 +367,7 @@ class Bot(commands.Bot):
         if channel is None:
             channel = ctx.author.name.lower()
         if channel.lower() == os.getenv('Not_leaveable'):
-            await ctx.reply(f"/me Der Bot kann den Kanal {channel.lower()} nicht verlassen.")
+            await ctx.reply(f"/me ⚠️ Der Bot kann den Kanal {channel.lower()} nicht verlassen. ⚠️")
             return
         mods = await self.get_mods(channel)
         if ctx.author.name.lower() == os.getenv('Bot_Admin'):
@@ -375,7 +375,7 @@ class Bot(commands.Bot):
                 channels = json.load(f)
             if channel in channels:
                 channels.remove(channel.lower())
-                await ctx.reply(f"/me Verlassen des Kanals: {channel}")
+                await ctx.reply(f"/me ❌ Verlassen des Kanals: {channel}")
                 with open('channels.json', 'w') as f:
                     json.dump(channels, f)
                 await self.part_channels([channel])
@@ -384,16 +384,16 @@ class Bot(commands.Bot):
                 for subscription in subscriptions:
                     await esclient.delete_subscription(subscription_id=subscription.id)
             else:
-                await ctx.reply(f"/me Ich bin in dem Channel nicht.")
+                await ctx.reply(f"/me ❌ Ich bin in dem Channel nicht.")
         elif ctx.author.name.lower() not in mods and ctx.author.name.lower() != os.getenv('Bot_Admin'):
-            await ctx.reply("/me Nur der Streamer und die Moderatoren können den Bot entfernen.")
+            await ctx.reply("/me ⚠️ Nur der Streamer und die Moderatoren können den Bot entfernen. ⚠️")
             return
         elif ctx.author.name.lower() in mods:
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
             if channel in channels:
                 channels.remove(channel.lower())
-                await ctx.reply(f"/me Verlassen des Kanals: {channel}")
+                await ctx.reply(f"/me ❌ Verlassen des Kanals: {channel}")
                 with open('channels.json', 'w') as f:
                     json.dump(channels, f)
                 await self.part_channels([channel])
@@ -417,7 +417,7 @@ class Bot(commands.Bot):
         response = requests.get(url)
         data = response.json()
         if not data:
-            await ctx.reply("/me ⚠️Der gesuchte Streamer wurde nicht gefunden!⚠️")
+            await ctx.reply("/me ⚠️ Der gesuchte Streamer wurde nicht gefunden! ⚠️")
             return
         
         streamer_id = data[0]['value']
@@ -428,7 +428,7 @@ class Bot(commands.Bot):
         data = response.json()
         
         if not data['data']:
-            await ctx.reply(f"/me ⚠️{safe_streamer_name} hat noch kein Spiel gespielt oder wird noch nicht getrackt.⚠️")
+            await ctx.reply(f"/me ⚠️ {safe_streamer_name} hat noch kein Spiel gespielt oder wird noch nicht getrackt. ⚠️")
             return
 
         num_games = min(num_games, len(data['data']))
@@ -458,14 +458,14 @@ class Bot(commands.Bot):
         messages.append(current_message.rstrip(" | "))
 
         for message in messages:
-            await ctx.reply('/me ' + message)
+            await ctx.reply('/me ✅ ' + message)
             await asyncio.sleep(0.5)
 
     @commands.command(name='bayrisch')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def bayrisch(self, ctx, *, message=None):
         if message is None:
-            await ctx.reply("/me Bitte gib eine Nachricht ein, die übersetzt werden soll.")
+            await ctx.reply("/me ⚠️ Bitte gib eine Nachricht ein, die übersetzt werden soll. ⚠️")
             return
         else:
             url = "https://translator-ai.onrender.com/"
@@ -480,13 +480,13 @@ class Bot(commands.Bot):
             response = requests.request("POST", url, headers=headers, data=payload)
             response_json = json.loads(response.text)
             translated_message = response_json['bot'].strip('"')
-            await ctx.reply('/me ' + translated_message)
+            await ctx.reply('/me ✅ ' + translated_message)
 
     @commands.command(name='ösi')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def oesi(self, ctx, *, message=None):
         if message is None:
-            await ctx.reply("/me Bitte gib eine Nachricht ein, die übersetzt werden soll.")
+            await ctx.reply("/me ⚠️ Bitte gib eine Nachricht ein, die übersetzt werden soll. ⚠️")
             return
         else:
             url = "https://translator-ai.onrender.com/"
@@ -501,7 +501,7 @@ class Bot(commands.Bot):
             response = requests.request("POST", url, headers=headers, data=payload)
             response_json = json.loads(response.text)
             translated_message = response_json['bot'].strip('"')
-            await ctx.reply('/me ' + translated_message)
+            await ctx.reply('/me ✅ ' + translated_message)
 
     @commands.command(name='freegames')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
@@ -534,14 +534,14 @@ class Bot(commands.Bot):
                                 break
 
         if free_games:
-            await ctx.reply(f"/me Die momentanen Free Games auf Epic: {', '.join(free_games)}")
+            await ctx.reply(f"/me ✅ Die momentanen Free Games auf Epic: {', '.join(free_games)}")
         else:
-            await ctx.reply("/me Es gibt momentan keine kostenlosen Spiele auf Epic.")
+            await ctx.reply("/me ❌ Es gibt momentan keine kostenlosen Spiele auf Epic.")
 
-    @commands.command(name='commands', aliases=['help'])
+    @commands.command(name='commands', aliases=['help', 'cmd', 'cmds'])
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
-        await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
+        await ctx.reply(f"/me ✅ Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
 
     @commands.command(name='logs', aliases=['log'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
@@ -552,9 +552,9 @@ class Bot(commands.Bot):
         logs = await self.search_logs(channel_name, username)
 
         if logs:
-            await ctx.reply(f'/me Die Logs vom Channel: {channel_name} sind auf den folgenden Seiten verfügbar: {" ".join(logs)}')
+            await ctx.reply(f'/me ✅ Die Logs vom Channel: {channel_name} sind auf den folgenden Seiten verfügbar: {" ".join(logs)}')
         else:
-            response = f'/me Keine Logs gefunden für den Channel. Benutze logs instanzen: '
+            response = f'/me ⚠️ Keine Logs gefunden für den Channel. ⚠️ Benutzte logs instanzen: '
             response += ' | '.join(log_sites[1:]) if len(log_sites) > 1 else ''
             await ctx.reply(response)
 
@@ -588,7 +588,7 @@ class Bot(commands.Bot):
                                     database=os.getenv('db_database'), loop=asyncio.get_event_loop())
         streamer_twitch_id = await self.fetch_users(names=[channel_name])
         if not streamer_twitch_id:
-            await ctx.reply('/me Kein Kanal gefunden mit diesem Namen')
+            await ctx.reply('/me ⚠️ Kein Kanal gefunden mit diesem Namen. ⚠️')
             return
         result = await conn.fetchrow(
             "SELECT live_days FROM channel_offdays_stats WHERE channel_id=$1 AND month=$2 AND year=$3",
@@ -597,7 +597,7 @@ class Bot(commands.Bot):
         await conn.close()
 
         if result is None:
-            await ctx.reply('/me Keine Daten zu diesem Zeitpunkt oder der Streamer wird nicht getracked.')
+            await ctx.reply('/me ⚠️ Keine Daten zu diesem Zeitpunkt oder der Streamer wird nicht getracked. ⚠️')
             return
         else:
             live_days = result['live_days']
@@ -605,12 +605,12 @@ class Bot(commands.Bot):
         offdays = days_in_month - live_days
 
         if month == datetime.now().month and year == datetime.now().year:
-            await ctx.reply(f"/me Offdays für diesen Monat im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
+            await ctx.reply(f"/me ✅ Offdays für diesen Monat im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
         else:
             month_names = ["Januar", "Februar", "März", "April", "Mai", "Juni",
                         "Juli", "August", "September", "Oktober", "November", "Dezember"]
             month_name = month_names[month - 1]
-            await ctx.reply(f"/me Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} offdays ({live_days}/{days_in_month})")
+            await ctx.reply(f"/me ✅ Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} offdays ({live_days}/{days_in_month})")
 
     @commands.command(name='restreams', aliases=['restream'])
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -622,7 +622,7 @@ class Bot(commands.Bot):
             mods = await self.get_mods(os.getenv('Bot_Admin'))
             print(mods)
             if ctx.author.name not in mods:
-                await ctx.reply('/me Nur Moderatoren können die Zeit hinzufügen.')
+                await ctx.reply('/me ❌ Nur Moderatoren können die Zeit hinzufügen.')
                 return
             print(time_parts)
             time = " ".join(time_parts)
@@ -645,7 +645,7 @@ class Bot(commands.Bot):
             print(streamer_name)
             streamer_twitch_id = await self.fetch_users(names=[streamer_name])
             if not streamer_twitch_id:
-                await ctx.reply('/me Kein Kanal gefunden mit diesem Namen')
+                await ctx.reply('/me ⚠️ Kein Kanal gefunden mit diesem Namen. ⚠️')
                 return
             print(streamer_twitch_id[0].id)
             await conn.execute('''
@@ -653,15 +653,15 @@ class Bot(commands.Bot):
                 ON CONFLICT (channel_id) DO UPDATE SET watch_time = twitch_channels.watch_time + $2
             ''', streamer_twitch_id[0].id, time_in_seconds)
             await conn.close()
-            await ctx.reply(f'/me Zeit wurde hinzugefügt.')
+            await ctx.reply(f'/me ✅ Zeit wurde hinzugefügt.')
         else:
             streamer_twitch_id = await self.fetch_users(names=[streamer_name])
             if not streamer_twitch_id:
-                await ctx.reply('/me Kein Kanal gefunden mit diesem Namen.')
+                await ctx.reply('/me ⚠️ Kein Kanal gefunden mit diesem Namen. ⚠️')
                 return
             seconds = await conn.fetchval('SELECT watch_time FROM twitch_channels WHERE channel_id = $1', streamer_twitch_id[0].id)
             if not seconds:
-                await ctx.reply('/me Keine Informationen zu diesem Benutzer.')
+                await ctx.reply('/me ⚠️ Keine Informationen zu diesem Benutzer. ⚠️')
                 return
             await conn.close()
             hours, remainder = divmod(seconds, 3600)
@@ -689,7 +689,7 @@ class Bot(commands.Bot):
             else:
                 time_str = parts[0] if parts else ""
             Bot_Admin = os.getenv('Bot_Admin')
-            await ctx.reply(f'/me {Bot_Admin} hat {streamer_twitch_id[0].display_name} schon: {time_str} restreamt.')
+            await ctx.reply(f'/me ✅ {Bot_Admin} hat {streamer_twitch_id[0].display_name} schon: {time_str} restreamt.')
 
     @commands.command(name='streak')
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -711,13 +711,13 @@ class Bot(commands.Bot):
     f"/me {streamer_twitch_id[0].name}'s aktuelle daily Streak: {current_streak} {'Tag' if current_streak == 1 else 'Tage'}, "
     f"höchste tracked daily Streak: {highest_streak} {'Tag' if highest_streak == 1 else 'Tage'}")
         else:
-            await ctx.reply(f"/me Keine Daten für {streamer_twitch_id[0].name} verfügbar")
+            await ctx.reply(f"/me ⚠️ Keine Daten für {streamer_twitch_id[0].name} verfügbar. ⚠️")
 
     @commands.command(name='update')
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
-    async def update_offdays(self, ctx, channel_name: str = None ):
+    async def update_offdays(self, ctx, channel_name: str):
         if channel_name is None:
-            channel_name = ctx.author.name.lower()
+            channel_name = ctx.channel.name.lower()
         mods = await self.get_mods(channel_name)
         if ctx.author.name.lower() in mods or ctx.author.name.lower() == os.getenv('Bot_Admin'):
             url = f"https://sullygnome.com/api/standardsearch/{channel_name}/false/true/false/false"
@@ -725,7 +725,7 @@ class Bot(commands.Bot):
             data = response.json()
 
             if not data:
-                ctx.reply("/me ⚠️ Der Streamer wird nicht auf sullygnome getracked. ⚠️")
+                await ctx.reply("/me ⚠️ Der Streamer wird nicht auf sullygnome getracked. ⚠️")
                 return
 
             streamer_id = data[0]['value']
@@ -747,7 +747,6 @@ class Bot(commands.Bot):
                     break
 
                 offset += 100
-                print(offset)
 
             live_days_per_month = defaultdict(int)
 
@@ -757,11 +756,12 @@ class Bot(commands.Bot):
                 month = stream_date.month
                 live_days_per_month[(year, month)] += 1
 
-            print(f"Off-days found: {live_days_per_month}")
+            print(f"Off-days found: {live_days_per_month} | {channel_name}")
 
             await self.update_offdays_in_db(channel_name, live_days_per_month)
+            await ctx.reply(f'/me ✅ Die Offdays wurden erfolgreich aktualisiert für den Channel: {channel_name}!')
         else:
-            await ctx.reply("Nur der Streamer und die Moderatoren können diesen Command ausführen.")
+            await ctx.reply("/me ❌ Nur der Streamer und die Moderatoren können diesen Command ausführen.")
 
     async def update_offdays_in_db(self, channel_name, live_days_per_month):
         conn = await asyncpg.connect(
@@ -782,7 +782,6 @@ class Bot(commands.Bot):
             )
 
             if result:
-                print(live_days)
                 await conn.execute(
                     "UPDATE channel_offdays_stats SET live_days=$1 WHERE id=$2",
                     live_days, result['id']
