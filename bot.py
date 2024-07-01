@@ -9,10 +9,13 @@ from twitchio.ext import commands, eventsub
 import twitchio
 import asyncio
 from typing import Optional
+import aiohttp
 from zoneinfo import ZoneInfo
 import time
 from datetime import datetime, timedelta, timezone
 import calendar
+from collections import defaultdict
+
 
 load_dotenv()
 
@@ -30,36 +33,6 @@ log_sites = [
   'https://log.spofoh.de'
 ]
 
-
-def search_logs(channel_name, username=None):
-    available_logs = []
-
-    for site in log_sites:
-        try:
-            response = requests.get(f'{site}/channels')
-
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    channels = [channel['name'] for channel in data['channels']]
-
-                    if channel_name.lower() in channels:
-                        url = f'{site}/?channel={channel_name}'
-
-                        if username:
-                            url += f'&username={username}'
-                    
-                        available_logs.append(url)
-                except ValueError:
-                    print(f'Warnung: Die Antwort von {site}/channels konnte nicht als JSON interpretiert werden.')
-            else:
-                print(f'Warnung: Anfrage an {site}/channels hat den Statuscode {response.status_code} zurückgegeben.')
-
-        except requests.exceptions.RequestException as e:
-            print(f'Warnung: Anfrage an {site} fehlgeschlagen. Fehlermeldung: {str(e)}')
-
-    return available_logs
-
 esbot = commands.Bot.from_client_credentials(client_id=os.getenv('Twitch_App_ID'),
                                          client_secret=os.getenv('Twitch_App_Token'))
 
@@ -71,9 +44,6 @@ esclient = eventsub.EventSubClient(esbot,
 class Bot(commands.Bot):
 
     def __init__(self):
-        with open('blacklist.json') as f:
-            data = json.load(f)
-            self.blacklist = [word.lower() for word in data['blacklist']]
         if not os.path.exists('channels.json'):
             with open('channels.json', 'w') as f:
                 json.dump([os.getenv('Not_leaveable')], f)
@@ -94,6 +64,45 @@ class Bot(commands.Bot):
                 await esclient.subscribe_channel_stream_start(broadcaster=broad_id.id)
             except twitchio.HTTPException:
                 pass
+
+    async def search_logs(self, channel_name, username=None):
+        available_logs = []
+
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for site in log_sites:
+                tasks.append(self.fetch_logs(session, site, channel_name, username))
+
+            results = await asyncio.gather(*tasks)
+            for result in results:
+                if result:
+                    available_logs.append(result)
+
+        return available_logs
+    
+    async def fetch_logs(self, session, site, channel_name, username):
+        try:
+            async with session.get(f'{site}/channels') as response:
+                if response.status == 200:
+                    try:
+                        data = await response.json()
+                        channels = [channel['name'] for channel in data['channels']]
+
+                        if channel_name.lower() in channels:
+                            url = f'{site}/?channel={channel_name}'
+
+                            if username:
+                                url += f'&username={username}'
+                        
+                            return url
+                    except aiohttp.ContentTypeError:
+                        print(f'Warnung: Die Antwort von {site}/channels konnte nicht als JSON interpretiert werden.')
+                else:
+                    print(f'Warnung: Anfrage an {site}/channels hat den Statuscode {response.status} zurückgegeben.')
+        except aiohttp.ClientError as e:
+            print(f'Warnung: Anfrage an {site} fehlgeschlagen. Fehlermeldung: {str(e)}')
+
+        return None
 
     async def get_mods(self, channel):
         url = "https://gql.twitch.tv/gql"
@@ -338,9 +347,9 @@ class Bot(commands.Bot):
             else:
                 await ctx.reply(f"/me Ich bin bereits dem Kanal {channel} beigetreten.")
         elif ctx.author.name.lower() not in mods and ctx.author.name.lower() != os.getenv('Bot_Admin'):
-            await ctx.send("Nur der Streamer und die Moderatoren können den Bot einem Kanal hinzufügen.")
+            await ctx.reply("/me Nur der Streamer und die Moderatoren können den Bot einem Kanal hinzufügen.")
             return
-        elif ctx.channel.name == ctx.author.name.lower() and ctx.author.name.lower() in mods:
+        elif ctx.author.name.lower() in mods:
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
             if channel not in channels:
@@ -379,7 +388,7 @@ class Bot(commands.Bot):
         elif ctx.author.name.lower() not in mods and ctx.author.name.lower() != os.getenv('Bot_Admin'):
             await ctx.reply("/me Nur der Streamer und die Moderatoren können den Bot entfernen.")
             return
-        elif ctx.channel.name == ctx.author.name.lower() and ctx.author.name.lower() in mods:
+        elif ctx.author.name.lower() in mods:
             with open('channels.json', 'r') as f:
                 channels = json.load(f)
             if channel in channels:
@@ -392,8 +401,6 @@ class Bot(commands.Bot):
                 subscriptions = await esclient.get_subscriptions(user_id=broadcaster_id[0].id)
                 for subscription in subscriptions:
                     await esclient.delete_subscription(subscription_id=subscription.id)
-        else:
-            await ctx.reply('/me Du kannst den Bot nur in deinem Channel entfernen')
 
     @commands.command(name='mostplayed')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
@@ -473,14 +480,7 @@ class Bot(commands.Bot):
             response = requests.request("POST", url, headers=headers, data=payload)
             response_json = json.loads(response.text)
             translated_message = response_json['bot'].strip('"')
-
-            cleaned_message = re.sub(r'\W+', '', translated_message.lower())
-            if any(badword in cleaned_message for badword in self.blacklist):
-                await ctx.reply("Blacklist-Wort in der Nachricht enthalten.")
-                logging.info(f'\nFrage: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")} {ctx.author.name}: "{message}"')
-                logging.info(f'Antwort: {translated_message}')
-            else:
-                await ctx.reply('/me ' + translated_message)
+            await ctx.reply('/me ' + translated_message)
 
     @commands.command(name='ösi')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
@@ -501,14 +501,7 @@ class Bot(commands.Bot):
             response = requests.request("POST", url, headers=headers, data=payload)
             response_json = json.loads(response.text)
             translated_message = response_json['bot'].strip('"')
-
-            cleaned_message = re.sub(r'\W+', '', translated_message.lower())
-            if any(badword in cleaned_message for badword in self.blacklist):
-                await ctx.reply("Blacklist-Wort in der Nachricht enthalten.")
-                logging.info(f'\nFrage: {datetime.now().strftime("%d.%m.%Y %H:%M:%S")} {ctx.author.name}: "{message}"')
-                logging.info(f'Antwort: {translated_message}')
-            else:
-                await ctx.reply('/me ' + translated_message)
+            await ctx.reply('/me ' + translated_message)
 
     @commands.command(name='freegames')
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
@@ -545,23 +538,18 @@ class Bot(commands.Bot):
         else:
             await ctx.reply("/me Es gibt momentan keine kostenlosen Spiele auf Epic.")
 
-    @commands.command(name='commands')
+    @commands.command(name='commands', aliases=['help'])
     @commands.cooldown(rate=1, per=15, bucket=commands.Bucket.channel)
     async def list_commands(self, ctx):
         await ctx.reply(f"/me Die verfügbaren Befehle findet man hier: https://pastebin.com/raw/PsLL2pJv")
 
-    @commands.command(name='logs')
+    @commands.command(name='logs', aliases=['log'])
     @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
     async def searchlogs(self, ctx, channel_name=None, username=None):
         if channel_name is None:
             channel_name = ctx.channel.name
 
-        cleaned_channel_name = re.sub(r'\W+', '', channel_name.lower())
-        if any(badword in cleaned_channel_name for badword in self.blacklist):
-            await ctx.reply("/me Blacklist-Wort im Kanalnamen enthalten.")
-            return
-
-        logs = search_logs(channel_name, username)
+        logs = await self.search_logs(channel_name, username)
 
         if logs:
             await ctx.reply(f'/me Die Logs vom Channel: {channel_name} sind auf den folgenden Seiten verfügbar: {" ".join(logs)}')
@@ -622,7 +610,7 @@ class Bot(commands.Bot):
             month_names = ["Januar", "Februar", "März", "April", "Mai", "Juni",
                         "Juli", "August", "September", "Oktober", "November", "Dezember"]
             month_name = month_names[month - 1]
-            await ctx.reply(f"/me Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} ({live_days}/{days_in_month})")
+            await ctx.reply(f"/me Offdays für {month_name} im Channel {streamer_twitch_id[0].display_name}: {offdays} offdays ({live_days}/{days_in_month})")
 
     @commands.command(name='restreams', aliases=['restream'])
     @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
@@ -724,6 +712,88 @@ class Bot(commands.Bot):
     f"höchste tracked daily Streak: {highest_streak} {'Tag' if highest_streak == 1 else 'Tage'}")
         else:
             await ctx.reply(f"/me Keine Daten für {streamer_twitch_id[0].name} verfügbar")
+
+    @commands.command(name='update')
+    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.channel)
+    async def update_offdays(self, ctx, channel_name: str = None ):
+        if channel_name is None:
+            channel_name = ctx.author.name.lower()
+        mods = await self.get_mods(channel_name)
+        if ctx.author.name.lower() in mods or ctx.author.name.lower() == os.getenv('Bot_Admin'):
+            url = f"https://sullygnome.com/api/standardsearch/{channel_name}/false/true/false/false"
+            response = requests.get(url)
+            data = response.json()
+
+            if not data:
+                print("⚠️ Der gesuchte Streamer wurde nicht gefunden! ⚠️")
+                return
+
+            streamer_id = data[0]['value']
+
+            all_streams = []
+            offset = 0
+
+            while True:
+                streams_url = f"https://sullygnome.com/api/tables/channeltables/streams/365/{streamer_id}/%20/1/1/desc/{offset}/100"
+                response = requests.get(streams_url)
+                streams_data = response.json()
+
+                if not streams_data['data']:
+                    break
+
+                all_streams.extend(streams_data['data'])
+
+                if len(streams_data['data']) < 100:
+                    break
+
+                offset += 100
+                print(offset)
+
+            live_days_per_month = defaultdict(int)
+
+            for stream in all_streams:
+                stream_date = datetime.strptime(stream['startDateTime'], "%Y-%m-%dT%H:%M:%SZ").date()
+                year = stream_date.year
+                month = stream_date.month
+                live_days_per_month[(year, month)] += 1
+
+            print(f"Off-days found: {live_days_per_month}")
+
+            await self.update_offdays_in_db(channel_name, live_days_per_month)
+        else:
+            await ctx.reply("Nur der Streamer und die Moderatoren können diesen Command ausführen.")
+
+    async def update_offdays_in_db(self, channel_name, live_days_per_month):
+        conn = await asyncpg.connect(
+            host=os.getenv('db_host_ip'), 
+            port=os.getenv('db_port'),
+            user=os.getenv('db_user'), 
+            password=os.getenv('db_password'),
+            database=os.getenv('db_database'), 
+            loop=asyncio.get_event_loop()
+        )
+
+        streamer_twitch_id = await self.fetch_users(names=[channel_name])
+
+        for (year, month), live_days in live_days_per_month.items():
+            result = await conn.fetchrow(
+                "SELECT id FROM channel_offdays_stats WHERE channel_id=$1 AND month=$2 AND year=$3",
+                streamer_twitch_id[0].id, month, year
+            )
+
+            if result:
+                print(live_days)
+                await conn.execute(
+                    "UPDATE channel_offdays_stats SET live_days=$1 WHERE id=$2",
+                    live_days, result['id']
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO channel_offdays_stats (channel_id, month, year, live_days) VALUES ($1, $2, $3, $4)",
+                    streamer_twitch_id[0].id, month, year, live_days
+                )
+
+        await conn.close()
 
 bot = Bot()
 bot.loop.run_until_complete(bot.__ainit__())
